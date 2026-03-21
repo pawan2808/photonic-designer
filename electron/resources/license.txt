@@ -1,0 +1,17 @@
+PHOTONIC DESIGNER - END USER LICENSE AGREEMENT
+
+Copyright (c) 2026. All rights reserved.
+
+This software is licensed, not sold. By installing or using this software,
+you agree to the following terms:
+
+1. You are granted a non-exclusive, non-transferable license to use this
+   software on ONE machine, identified by its hardware fingerprint.
+
+2. You may not copy, modify, distribute, reverse engineer, decompile,
+   or disassemble the software.
+
+3. The software requires online activation and periodic validation.
+   The license may be revoked at any time by the licensor.
+
+4. The software is provided "AS IS" without warranty of any kind.
