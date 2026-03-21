@@ -67,18 +67,35 @@ class LicenseManager {
         this.sheets = google.sheets({ version: 'v4', auth });
       }
 
-      // Check if we have a stored valid license
+      // Check if we have a stored license
       const stored = store.get('license');
       if (stored?.key && stored?.validated) {
-        const elapsed = Date.now() - (stored.lastCheck || 0);
-        if (elapsed < GRACE_PERIOD) {
-          // Within grace period — accept stored license while we verify online
-          this.isValid = true;
-          this.licenseInfo = stored;
-          this._startHeartbeat();
-          // Verify in background
-          this._verifyOnline(stored.key).catch(e => log.warn('Background verify failed:', e));
-          return { valid: true, info: stored };
+        // ALWAYS verify online on startup — no grace period for launch
+        if (this.sheets) {
+          try {
+            log.info('Verifying license online...');
+            const isValid = await this._verifyOnline(stored.key);
+            if (isValid) {
+              this.isValid = true;
+              this.licenseInfo = stored;
+              this._startHeartbeat();
+              return { valid: true, info: stored };
+            } else {
+              // License revoked or expired
+              return { valid: false, needsActivation: true };
+            }
+          } catch (e) {
+            log.warn('Online verification failed:', e.message);
+            // Only allow grace period if we can't reach Google (offline)
+            const elapsed = Date.now() - (stored.lastCheck || 0);
+            if (elapsed < GRACE_PERIOD) {
+              log.info('Offline — using cached license (grace period)');
+              this.isValid = true;
+              this.licenseInfo = stored;
+              this._startHeartbeat();
+              return { valid: true, info: stored };
+            }
+          }
         }
       }
 
