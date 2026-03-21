@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:* 'unsafe-inline' 'unsafe-eval'; connect-src http://localhost:* ws://localhost:*; img-src 'self' data: blob:;">
+  <title>Photonic Designer</title>
+  <style>
+    /* Loading state before React mounts */
+    body { margin: 0; background: #1a1a2e; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    #app-loader {
+      display: flex; align-items: center; justify-content: center;
+      height: 100vh; color: #8888aa; font-size: 14px;
+    }
+    #app-loader.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="app-loader">
+    <span>Loading Photonic Designer...</span>
+  </div>
+
+  <!-- React + ReactDOM from CDN (or bundled in production) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- The main React app -->
+  <script type="text/babel" src="App.jsx"></script>
+
+  <script>
+    // Hide loader once React mounts
+    const observer = new MutationObserver(() => {
+      if (document.getElementById('root')?.children.length > 0) {
+        document.getElementById('app-loader')?.classList.add('hidden');
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.getElementById('root'), { childList: true });
+  </script>
+</body>
+</html>

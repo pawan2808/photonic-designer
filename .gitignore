@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist-obfuscated/
+python-embed/
+.downloads/
+*.pyc
+__pycache__/
+.env
+config/google_credentials.json
+electron/resources/icon.ico
+electron/resources/icon.icns

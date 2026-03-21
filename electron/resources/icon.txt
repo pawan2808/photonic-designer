@@ -1,0 +1,2 @@
+PLACEHOLDER - Replace with your app icon (256x256 PNG)
+See README.md for icon requirements
