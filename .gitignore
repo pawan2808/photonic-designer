@@ -7,5 +7,3 @@ python-embed/
 __pycache__/
 .env
 config/google_credentials.json
-electron/resources/icon.ico
-electron/resources/icon.icns
