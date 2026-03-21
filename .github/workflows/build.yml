@@ -22,7 +22,7 @@ jobs:
       - name: Download embedded Python
         shell: powershell
         run: |
-          $url = "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+          $url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250612/cpython-3.11.12+20250612-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
           Invoke-WebRequest -Uri $url -OutFile python-embed.tar.gz
           mkdir python-embed
           tar -xzf python-embed.tar.gz -C python-embed
@@ -31,23 +31,20 @@ jobs:
             Remove-Item python-embed/python
           }
 
-      - name: Install Python packages into embed
+      - name: Install Python packages
         shell: cmd
         run: |
           python-embed\python.exe -m ensurepip --upgrade
           python-embed\python.exe -m pip install --upgrade pip
           python-embed\python.exe -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
           python-embed\python.exe -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed\python.exe -m pip install gdstk || echo "gdstk install failed, using fallback"
+          python-embed\python.exe -m pip install gdstk || echo "gdstk failed, using pure-python fallback"
 
       - name: Install IHP PDK
         shell: cmd
         run: |
-          cd pdk
-          powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force"
-          cd ..
-          python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02 || echo "PDK pip install failed, copying manually"
-          if not exist "python-embed\Lib\site-packages\IHP_PDK" xcopy /E /I /Q pdk\IHP_PDK_Nazca_PreDev_V02\IHP_PDK python-embed\Lib\site-packages\IHP_PDK
+          cd pdk && powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force" && cd ..
+          python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02 || xcopy /E /I /Q pdk\IHP_PDK_Nazca_PreDev_V02\IHP_PDK python-embed\Lib\site-packages\IHP_PDK
 
       - name: Patch app.py
         run: python scripts/app_patch.py
@@ -62,7 +59,7 @@ jobs:
         working-directory: electron
         run: npm install
 
-      - name: Build Windows x64 installer
+      - name: Build Windows installer
         working-directory: electron
         run: npx electron-builder --win --x64
         env:
@@ -75,7 +72,7 @@ jobs:
           path: build/*.exe
 
   build-mac:
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
@@ -91,7 +88,7 @@ jobs:
 
       - name: Download embedded Python
         run: |
-          curl -L -o python-embed.tar.gz "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-apple-darwin-install_only_stripped.tar.gz"
+          curl -L -o python-embed.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20250612/cpython-3.11.12+20250612-x86_64-apple-darwin-install_only_stripped.tar.gz"
           mkdir -p python-embed
           tar -xzf python-embed.tar.gz -C python-embed
           if [ -d "python-embed/python" ]; then
@@ -99,7 +96,7 @@ jobs:
             rmdir python-embed/python
           fi
 
-      - name: Install Python packages into embed
+      - name: Install Python packages
         run: |
           python-embed/bin/python3 -m ensurepip --upgrade
           python-embed/bin/python3 -m pip install --upgrade pip
@@ -124,15 +121,13 @@ jobs:
         working-directory: electron
         run: npm install
 
-      - name: Build macOS DMGs
+      - name: Build macOS DMG
         working-directory: electron
-        run: |
-          npx electron-builder --mac --x64
-          npx electron-builder --mac --arm64
+        run: npx electron-builder --mac --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload DMGs
+      - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: PhotonicDesigner-macOS
