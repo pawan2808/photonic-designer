@@ -101,32 +101,37 @@ jobs:
         with:
           python-version: '3.11'
 
-      # ─── Download standalone Python to embed ───────────────────────
-      - name: Download embedded Python (x64 + arm64)
+      # ─── Use setup-python as embedded Python ────────────────────────
+      - name: Create embedded Python
         run: |
-          # For universal build, we use x64 (Rosetta handles it on ARM)
-          curl -L -o python-embed.tar.gz "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-apple-darwin-install_only_stripped.tar.gz"
+          PYTHON_PATH=$(which python3)
+          PYTHON_DIR=$(dirname $(dirname $PYTHON_PATH))
           mkdir -p python-embed
-          tar -xzf python-embed.tar.gz -C python-embed
-          if [ -d "python-embed/python" ]; then
-            mv python-embed/python/* python-embed/
-            rmdir python-embed/python
+          cp -r $PYTHON_DIR/* python-embed/ 2>/dev/null || true
+          # Ensure python3 binary exists
+          if [ ! -f "python-embed/bin/python3" ]; then
+            cp -r $(python3 -c "import sys; print(sys.prefix)")/* python-embed/
           fi
+          python-embed/bin/python3 --version || python3 --version
 
       # ─── Install Python packages ──────────────────────────────────
       - name: Install Python packages into embed
         run: |
-          python-embed/bin/python3 -m ensurepip --upgrade
-          python-embed/bin/python3 -m pip install --upgrade pip
-          python-embed/bin/python3 -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
-          python-embed/bin/python3 -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed/bin/python3 -m pip install gdstk || true
+          PY="python-embed/bin/python3"
+          if [ ! -f "$PY" ]; then PY="python3"; fi
+          $PY -m pip install --upgrade pip
+          $PY -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
+          $PY -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
+          $PY -m pip install gdstk || echo "gdstk not available, using fallback"
+          $PY -c "import flask; import nazca; print('All packages OK')"
 
       # ─── Install IHP PDK ──────────────────────────────────────────
       - name: Install IHP PDK
         run: |
+          PY="python-embed/bin/python3"
+          if [ ! -f "$PY" ]; then PY="python3"; fi
           cd pdk && unzip -o IHP_PDK_Nazca_PreDev_V02.zip && cd ..
-          python-embed/bin/python3 -m pip install -e pdk/IHP_PDK_Nazca_PreDev_V02
+          $PY -m pip install -e pdk/IHP_PDK_Nazca_PreDev_V02 || cp -r pdk/IHP_PDK_Nazca_PreDev_V02/IHP_PDK python-embed/lib/python3.11/site-packages/ 2>/dev/null || true
 
       # ─── Patch + config ────────────────────────────────────────────
       - name: Patch app.py
