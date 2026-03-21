@@ -45,7 +45,8 @@ jobs:
         run: |
           python scripts/app_patch.py
           mkdir config -ErrorAction SilentlyContinue
-          echo '{"mode": "demo"}' > config/license_config.json
+          echo '{"mode": "production", "sheetId": "1EYlnpDJWFEHssugRB7OmzZA9wF9IReLfc2V3JSyRsmc"}' > config/license_config.json
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > config/google_credentials.json
 
       - name: Build installer
         working-directory: electron
@@ -95,7 +96,8 @@ jobs:
         run: |
           python3 scripts/app_patch.py
           mkdir -p config
-          echo '{"mode": "demo"}' > config/license_config.json
+          echo '{"mode": "production", "sheetId": "1EYlnpDJWFEHssugRB7OmzZA9wF9IReLfc2V3JSyRsmc"}' > config/license_config.json
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > config/google_credentials.json
 
       - name: Build DMG
         working-directory: electron
