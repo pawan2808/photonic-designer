@@ -1,7 +1,7 @@
 {
   "name": "photonic-designer",
   "version": "1.0.0",
-  "description": "Photonic IC Layout Designer — IHP SiN PDK",
+  "description": "Photonic IC Layout Designer \u2014 IHP SiN PDK",
   "main": "main.js",
   "author": "Photonic Designer Team",
   "license": "UNLICENSED",
@@ -34,7 +34,7 @@
   "build": {
     "appId": "com.photonicdesigner.app",
     "productName": "Photonic Designer",
-    "copyright": "Copyright © 2026 Photonic Designer",
+    "copyright": "Copyright \u00a9 2026 Photonic Designer",
     "directories": {
       "output": "../build",
       "buildResources": "resources"
@@ -48,22 +48,30 @@
       {
         "from": "../src",
         "to": "app-src",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../pdk",
         "to": "pdk",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../config",
         "to": "config",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../python-embed",
         "to": "python-embed",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": true,
@@ -72,7 +80,13 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64", "arm64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "resources/icon.ico",
       "artifactName": "${productName}-Setup-${version}-win-${arch}.${ext}"
@@ -90,7 +104,13 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "resources/icon.icns",
       "category": "public.app-category.developer-tools",
@@ -100,14 +120,26 @@
     },
     "dmg": {
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "resources/icon.png",
       "category": "Development"
-    }
+    },
+    "publish": null
   }
 }
