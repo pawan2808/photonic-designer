@@ -79,13 +79,47 @@ function getPythonPath() {
     }
   }
 
-  // Production: embedded Python
+  // Production: try embedded Python first, then system Python
   const embedDir = path.join(resourcesPath, 'python-embed');
-
+  
   if (platform === 'win32') {
-    return path.join(embedDir, 'python.exe');
+    // Try multiple possible embedded locations
+    const candidates = [
+      path.join(embedDir, 'python.exe'),
+      path.join(embedDir, 'python', 'python.exe'),
+      path.join(embedDir, 'Scripts', 'python.exe'),
+      path.join(resourcesPath, 'python', 'python.exe'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        log.info(`Found embedded Python: ${p}`);
+        return p;
+      }
+    }
+    // Fallback to system Python
+    log.warn('Embedded Python not found, trying system Python...');
+    const { execSync } = require('child_process');
+    for (const cmd of ['python', 'python3', 'py']) {
+      try {
+        execSync(`where ${cmd}`, { timeout: 5000 });
+        return cmd;
+      } catch (e) {}
+    }
+    return 'python';
   } else if (platform === 'darwin') {
-    return path.join(embedDir, 'bin', 'python3');
+    const candidates = [
+      path.join(embedDir, 'bin', 'python3'),
+      path.join(embedDir, 'bin', 'python3.11'),
+      path.join(embedDir, 'python', 'bin', 'python3'),
+      path.join(resourcesPath, 'python', 'bin', 'python3'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        log.info(`Found embedded Python: ${p}`);
+        return p;
+      }
+    }
+    return 'python3';
   } else {
     return path.join(embedDir, 'bin', 'python3');
   }

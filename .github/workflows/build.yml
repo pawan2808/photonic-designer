@@ -1,6 +1,9 @@
 name: Build Installers
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -8,106 +11,149 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: actions/setup-python@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Download embedded Python
+      # ─── Download standalone Python to embed ───────────────────────
+      - name: Download embedded Python (x64)
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://github.com/astral-sh/python-build-standalone/releases/download/20260303/cpython-3.11.15+20260303-x86_64-pc-windows-msvc-install_only_stripped.tar.gz" -OutFile python-embed.tar.gz
+          $url = "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+          Invoke-WebRequest -Uri $url -OutFile python-embed.tar.gz
           mkdir python-embed
           tar -xzf python-embed.tar.gz -C python-embed
-          if (Test-Path python-embed\python) {
-            Get-ChildItem python-embed\python | Move-Item -Destination python-embed\
-            Remove-Item python-embed\python
+          # Flatten python/ subdirectory
+          if (Test-Path python-embed/python) {
+            Get-ChildItem python-embed/python | Move-Item -Destination python-embed/
+            Remove-Item python-embed/python
           }
 
-      - name: Install packages into embed
+      # ─── Install Python packages into embedded Python ──────────────
+      - name: Install Python packages into embed
         shell: cmd
         run: |
           python-embed\python.exe -m ensurepip --upgrade
           python-embed\python.exe -m pip install --upgrade pip
           python-embed\python.exe -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
           python-embed\python.exe -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed\python.exe -m pip install gdstk || echo "using fallback gdstk.py"
+          python-embed\python.exe -m pip install gdstk || echo "gdstk not available, using pure-python fallback"
+          python-embed\python.exe -c "import flask; import nazca; print('All packages OK')"
 
+      # ─── Install IHP PDK into embedded Python ─────────────────────
       - name: Install IHP PDK
         shell: cmd
         run: |
-          cd pdk && powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force" && cd ..
-          python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02 || xcopy /E /I /Q pdk\IHP_PDK_Nazca_PreDev_V02\IHP_PDK python-embed\Lib\site-packages\IHP_PDK
+          cd pdk
+          powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force"
+          cd ..
+          python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02
 
-      - name: Patch and configure
+      # ─── Patch app.py ─────────────────────────────────────────────
+      - name: Patch app.py for Electron
+        run: python scripts/app_patch.py
+
+      # ─── Setup config ─────────────────────────────────────────────
+      - name: Create config
+        shell: cmd
         run: |
-          python scripts/app_patch.py
-          mkdir config -ErrorAction SilentlyContinue
-          echo '{"mode": "production", "sheetId": "1EYlnpDJWFEHssugRB7OmzZA9wF9IReLfc2V3JSyRsmc"}' > config/license_config.json
-          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > config/google_credentials.json
+          if not exist config mkdir config
+          echo {"mode": "demo"} > config\license_config.json
 
-      - name: Build installer
+      # ─── Install Node.js dependencies ─────────────────────────────
+      - name: Install Node dependencies
         working-directory: electron
-        run: |
-          npm install
-          npx electron-builder --win --x64 --publish never
+        run: npm install
+
+      # ─── Build Windows installer ──────────────────────────────────
+      - name: Build Windows x64 installer
+        working-directory: electron
+        run: npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/upload-artifact@v4
+      # ─── Upload artifact ──────────────────────────────────────────
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
         with:
-          name: PhotonicDesigner-Windows
+          name: PhotonicDesigner-Windows-x64
           path: build/*.exe
 
   build-mac:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: actions/setup-python@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Download embedded Python
+      # ─── Download standalone Python to embed ───────────────────────
+      - name: Download embedded Python (x64 + arm64)
         run: |
-          curl -L -o python-embed.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20260303/cpython-3.11.15+20260303-aarch64-apple-darwin-install_only_stripped.tar.gz"
+          # For universal build, we use x64 (Rosetta handles it on ARM)
+          curl -L -o python-embed.tar.gz "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-apple-darwin-install_only_stripped.tar.gz"
           mkdir -p python-embed
           tar -xzf python-embed.tar.gz -C python-embed
-          [ -d "python-embed/python" ] && mv python-embed/python/* python-embed/ && rmdir python-embed/python
+          if [ -d "python-embed/python" ]; then
+            mv python-embed/python/* python-embed/
+            rmdir python-embed/python
+          fi
 
-      - name: Install packages into embed
+      # ─── Install Python packages ──────────────────────────────────
+      - name: Install Python packages into embed
         run: |
           python-embed/bin/python3 -m ensurepip --upgrade
           python-embed/bin/python3 -m pip install --upgrade pip
           python-embed/bin/python3 -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
           python-embed/bin/python3 -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed/bin/python3 -m pip install gdstk || echo "using fallback"
+          python-embed/bin/python3 -m pip install gdstk || true
 
+      # ─── Install IHP PDK ──────────────────────────────────────────
       - name: Install IHP PDK
         run: |
           cd pdk && unzip -o IHP_PDK_Nazca_PreDev_V02.zip && cd ..
-          python-embed/bin/python3 -m pip install -e pdk/IHP_PDK_Nazca_PreDev_V02 || cp -r pdk/IHP_PDK_Nazca_PreDev_V02/IHP_PDK python-embed/lib/python3.11/site-packages/
+          python-embed/bin/python3 -m pip install -e pdk/IHP_PDK_Nazca_PreDev_V02
 
-      - name: Patch and configure
+      # ─── Patch + config ────────────────────────────────────────────
+      - name: Patch app.py
+        run: python3 scripts/app_patch.py
+
+      - name: Create config
         run: |
-          python3 scripts/app_patch.py
           mkdir -p config
-          echo '{"mode": "production", "sheetId": "1EYlnpDJWFEHssugRB7OmzZA9wF9IReLfc2V3JSyRsmc"}' > config/license_config.json
-          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > config/google_credentials.json
+          echo '{"mode": "demo"}' > config/license_config.json
 
-      - name: Build DMG
+      # ─── Install Node.js dependencies ─────────────────────────────
+      - name: Install Node dependencies
+        working-directory: electron
+        run: npm install
+
+      # ─── Build macOS DMG ──────────────────────────────────────────
+      - name: Build macOS DMG (x64 + ARM)
         working-directory: electron
         run: |
-          npm install
-          npx electron-builder --mac --arm64 --publish never
+          npx electron-builder --mac --x64
+          npx electron-builder --mac --arm64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/upload-artifact@v4
+      # ─── Upload artifacts ─────────────────────────────────────────
+      - name: Upload DMGs
+        uses: actions/upload-artifact@v4
         with:
           name: PhotonicDesigner-macOS
           path: build/*.dmg
