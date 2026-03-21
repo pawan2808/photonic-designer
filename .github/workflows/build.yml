@@ -51,7 +51,7 @@ jobs:
         working-directory: electron
         run: |
           npm install
-          npx electron-builder --win --x64
+          npx electron-builder --win --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -101,7 +101,7 @@ jobs:
         working-directory: electron
         run: |
           npm install
-          npx electron-builder --mac --arm64
+          npx electron-builder --mac --arm64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
