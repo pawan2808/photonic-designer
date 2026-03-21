@@ -22,30 +22,34 @@ jobs:
         with:
           python-version: '3.11'
 
-      # ─── Download standalone Python to embed ───────────────────────
-      - name: Download embedded Python (x64)
+      # ─── Create embedded Python from setup-python ────────────────
+      - name: Create embedded Python
         shell: powershell
         run: |
-          $url = "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
-          Invoke-WebRequest -Uri $url -OutFile python-embed.tar.gz
-          mkdir python-embed
-          tar -xzf python-embed.tar.gz -C python-embed
-          # Flatten python/ subdirectory
-          if (Test-Path python-embed/python) {
-            Get-ChildItem python-embed/python | Move-Item -Destination python-embed/
-            Remove-Item python-embed/python
+          $pythonPath = (Get-Command python).Source
+          $pythonDir = Split-Path (Split-Path $pythonPath)
+          mkdir python-embed -ErrorAction SilentlyContinue
+          Copy-Item -Path "$pythonDir\*" -Destination "python-embed\" -Recurse -Force
+          if (-not (Test-Path "python-embed\python.exe")) {
+            $prefix = python -c "import sys; print(sys.prefix)"
+            Copy-Item -Path "$prefix\*" -Destination "python-embed\" -Recurse -Force
           }
+          python-embed\python.exe --version
 
       # ─── Install Python packages into embedded Python ──────────────
-      - name: Install Python packages into embed
+      - name: Install Python packages
         shell: cmd
         run: |
-          python-embed\python.exe -m ensurepip --upgrade
-          python-embed\python.exe -m pip install --upgrade pip
-          python-embed\python.exe -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
-          python-embed\python.exe -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed\python.exe -m pip install gdstk || echo "gdstk not available, using pure-python fallback"
-          python-embed\python.exe -c "import flask; import nazca; print('All packages OK')"
+          if exist python-embed\python.exe (
+            set PY=python-embed\python.exe
+          ) else (
+            set PY=python
+          )
+          %PY% -m pip install --upgrade pip
+          %PY% -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
+          %PY% -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
+          %PY% -m pip install gdstk || echo "gdstk not available, using pure-python fallback"
+          %PY% -c "import flask; import nazca; print('All packages OK')"
 
       # ─── Install IHP PDK into embedded Python ─────────────────────
       - name: Install IHP PDK
@@ -54,7 +58,11 @@ jobs:
           cd pdk
           powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force"
           cd ..
-          python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02
+          if exist python-embed\python.exe (
+            python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02 || xcopy /E /I /Q pdk\IHP_PDK_Nazca_PreDev_V02\IHP_PDK python-embed\Lib\site-packages\IHP_PDK
+          ) else (
+            python -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02
+          )
 
       # ─── Patch app.py ─────────────────────────────────────────────
       - name: Patch app.py for Electron
