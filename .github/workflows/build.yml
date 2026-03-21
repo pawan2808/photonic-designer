@@ -8,37 +8,32 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Download embedded Python
         shell: powershell
         run: |
-          $url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250612/cpython-3.11.12+20250612-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
-          Invoke-WebRequest -Uri $url -OutFile python-embed.tar.gz
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/python-build-standalone/releases/download/20260303/cpython-3.11.15+20260303-x86_64-pc-windows-msvc-install_only_stripped.tar.gz" -OutFile python-embed.tar.gz
           mkdir python-embed
           tar -xzf python-embed.tar.gz -C python-embed
-          if (Test-Path python-embed/python) {
-            Get-ChildItem python-embed/python | Move-Item -Destination python-embed/
-            Remove-Item python-embed/python
+          if (Test-Path python-embed\python) {
+            Get-ChildItem python-embed\python | Move-Item -Destination python-embed\
+            Remove-Item python-embed\python
           }
 
-      - name: Install Python packages
+      - name: Install packages into embed
         shell: cmd
         run: |
           python-embed\python.exe -m ensurepip --upgrade
           python-embed\python.exe -m pip install --upgrade pip
           python-embed\python.exe -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
           python-embed\python.exe -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed\python.exe -m pip install gdstk || echo "gdstk failed, using pure-python fallback"
+          python-embed\python.exe -m pip install gdstk || echo "using fallback gdstk.py"
 
       - name: Install IHP PDK
         shell: cmd
@@ -46,89 +41,71 @@ jobs:
           cd pdk && powershell -Command "Expand-Archive -Path IHP_PDK_Nazca_PreDev_V02.zip -DestinationPath . -Force" && cd ..
           python-embed\python.exe -m pip install -e pdk\IHP_PDK_Nazca_PreDev_V02 || xcopy /E /I /Q pdk\IHP_PDK_Nazca_PreDev_V02\IHP_PDK python-embed\Lib\site-packages\IHP_PDK
 
-      - name: Patch app.py
-        run: python scripts/app_patch.py
-
-      - name: Create config
-        shell: cmd
+      - name: Patch and configure
         run: |
-          if not exist config mkdir config
-          echo {"mode": "demo"} > config\license_config.json
+          python scripts/app_patch.py
+          mkdir config -ErrorAction SilentlyContinue
+          echo '{"mode": "demo"}' > config/license_config.json
 
-      - name: Install Node dependencies
+      - name: Build installer
         working-directory: electron
-        run: npm install
-
-      - name: Build Windows installer
-        working-directory: electron
-        run: npx electron-builder --win --x64
+        run: |
+          npm install
+          npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: PhotonicDesigner-Windows-x64
+          name: PhotonicDesigner-Windows
           path: build/*.exe
 
   build-mac:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Download embedded Python
         run: |
-          curl -L -o python-embed.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20250612/cpython-3.11.12+20250612-x86_64-apple-darwin-install_only_stripped.tar.gz"
+          curl -L -o python-embed.tar.gz "https://github.com/astral-sh/python-build-standalone/releases/download/20260303/cpython-3.11.15+20260303-aarch64-apple-darwin-install_only_stripped.tar.gz"
           mkdir -p python-embed
           tar -xzf python-embed.tar.gz -C python-embed
-          if [ -d "python-embed/python" ]; then
-            mv python-embed/python/* python-embed/
-            rmdir python-embed/python
-          fi
+          [ -d "python-embed/python" ] && mv python-embed/python/* python-embed/ && rmdir python-embed/python
 
-      - name: Install Python packages
+      - name: Install packages into embed
         run: |
           python-embed/bin/python3 -m ensurepip --upgrade
           python-embed/bin/python3 -m pip install --upgrade pip
           python-embed/bin/python3 -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
           python-embed/bin/python3 -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
-          python-embed/bin/python3 -m pip install gdstk || echo "gdstk fallback"
+          python-embed/bin/python3 -m pip install gdstk || echo "using fallback"
 
       - name: Install IHP PDK
         run: |
           cd pdk && unzip -o IHP_PDK_Nazca_PreDev_V02.zip && cd ..
           python-embed/bin/python3 -m pip install -e pdk/IHP_PDK_Nazca_PreDev_V02 || cp -r pdk/IHP_PDK_Nazca_PreDev_V02/IHP_PDK python-embed/lib/python3.11/site-packages/
 
-      - name: Patch app.py
-        run: python3 scripts/app_patch.py
-
-      - name: Create config
+      - name: Patch and configure
         run: |
+          python3 scripts/app_patch.py
           mkdir -p config
           echo '{"mode": "demo"}' > config/license_config.json
 
-      - name: Install Node dependencies
+      - name: Build DMG
         working-directory: electron
-        run: npm install
-
-      - name: Build macOS DMG
-        working-directory: electron
-        run: npx electron-builder --mac --x64
+        run: |
+          npm install
+          npx electron-builder --mac --arm64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: PhotonicDesigner-macOS
           path: build/*.dmg
