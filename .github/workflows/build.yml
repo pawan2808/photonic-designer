@@ -47,9 +47,19 @@ jobs:
           )
           %PY% -m pip install --upgrade pip
           %PY% -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
-          %PY% -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
           %PY% -m pip install gdstk || echo "gdstk not available, using pure-python fallback"
-          %PY% -c "import flask; import nazca; print('All packages OK')"
+
+      - name: Install Nazca
+        shell: bash
+        run: |
+          curl -L -A "Mozilla/5.0" -o nazca-0.6.1.tar.gz "https://nazca-design.org/dist/nazca-0.6.1.tar.gz"
+          if [ -f python-embed/python.exe ]; then
+            PY="python-embed/python.exe"
+          else
+            PY="python"
+          fi
+          $PY -m pip install --no-deps nazca-0.6.1.tar.gz
+          $PY -c "import flask; import nazca; print('All packages OK')"
 
       # ─── Install IHP PDK into embedded Python ─────────────────────
       - name: Install IHP PDK
@@ -129,8 +139,14 @@ jobs:
           if [ ! -f "$PY" ]; then PY="python3"; fi
           $PY -m pip install --upgrade pip
           $PY -m pip install flask flask-cors numpy scipy pandas matplotlib Pillow PyYAML ipython pyclipper
-          $PY -m pip install --no-deps https://nazca-design.org/dist/nazca-0.6.1.tar.gz
           $PY -m pip install gdstk || echo "gdstk not available, using fallback"
+
+      - name: Install Nazca
+        run: |
+          PY="python-embed/bin/python3"
+          if [ ! -f "$PY" ]; then PY="python3"; fi
+          curl -L -A "Mozilla/5.0" -o nazca-0.6.1.tar.gz "https://nazca-design.org/dist/nazca-0.6.1.tar.gz"
+          $PY -m pip install --no-deps nazca-0.6.1.tar.gz
           $PY -c "import flask; import nazca; print('All packages OK')"
 
       # ─── Install IHP PDK ──────────────────────────────────────────
