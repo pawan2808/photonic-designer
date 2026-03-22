@@ -23,12 +23,12 @@
     "systeminformation": "^5.21.0",
     "crypto-js": "^4.2.0",
     "electron-log": "^5.0.0",
-    "electron-updater": "^6.1.0",
+    "electron-updater": "^6.3.9",
     "portfinder": "^1.0.32"
   },
   "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.0",
+    "electron": "^32.0.0",
+    "electron-builder": "^25.1.0",
     "cross-env": "^7.0.3"
   },
   "build": {
