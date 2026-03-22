@@ -4169,26 +4169,8 @@ def create_pdk_template():
 import json
 
 
-# ── Static file serving for Electron (serves index.html + App.jsx) ──────────
-import mimetypes
-mimetypes.add_type('application/javascript', '.jsx')
-
-@app.route('/')
-def serve_index():
-    return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
-
-@app.route('/<path:filename>')
-def serve_static(filename):
-    filepath = os.path.join(os.path.dirname(__file__), filename)
-    if os.path.isfile(filepath):
-        return send_file(filepath)
-    return "Not found", 404
-
-
 if __name__ == "__main__":
-    port = int(os.environ.get("FLASK_PORT", 5000))
-    is_production = os.environ.get("FLASK_ENV") == "production"
     print(f"\n  Photonic Designer Backend")
     print(f"  nazca available: {NAZCA_AVAILABLE}")
-    print(f"  http://localhost:{port}\n")
-    app.run(debug=not is_production, port=port, host="127.0.0.1")
+    print(f"  http://localhost:5000\n")
+    app.run(debug=True, port=5000)

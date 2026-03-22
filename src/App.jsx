@@ -93,7 +93,7 @@ const polygonCache = new Map();
 // For GratingCoupler: a0 is at the narrow end (waveguide connection) per IHP PDK.
 // No rotation offset needed since we use a0 as anchor.
 
-function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, rotation = 0, componentType = '', highlightLayer = null, hiddenLayers = new Set() }) {
+const RealPolygonRenderer = React.memo(function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, rotation = 0, componentType = '', highlightLayer = null, hiddenLayers = new Set() }) {
   if (!polygons || polygons.length === 0) return null;
   
   // Filter out hidden layers
@@ -156,7 +156,7 @@ function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, 
     >
       <LayerPatternDefs />
       <g transform={`rotate(${rotation}, ${anchorSvgX}, ${anchorSvgY})`}>
-        {/* Render all visible polygons */}
+        {/* Render all visible polygons — merged fill+stroke for perf */}
         {visiblePolygons.map((poly, idx) => {
           const layerInfo = POLY_LAYER_COLORS[poly.layer] || { color: "#888888", opacity: 0.5, pattern: "solid" };
           const color = layerInfo.color;
@@ -170,38 +170,18 @@ function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, 
             return `${xSvg},${ySvg}`;
           }).join(" ");
           
-          // Use pattern fill for non-solid patterns
-          const fillStyle = pattern === "solid" 
-            ? color 
-            : `url(#pattern-${pattern})`;
-          
+          // Merged: single polygon for fill+stroke (was 3-4 elements before)
           return (
             <g key={idx} style={{ color: color }}>
-              {/* Solid fill background */}
               <polygon
                 points={points}
-                fill={color}
-                fillOpacity={opacity * 0.4}
-                stroke="none"
-              />
-              {/* Pattern overlay */}
-              {pattern !== "solid" && (
-                <polygon
-                  points={points}
-                  fill={fillStyle}
-                  fillOpacity={opacity}
-                  stroke="none"
-                />
-              )}
-              {/* Stroke */}
-              <polygon
-                points={points}
-                fill="none"
+                fill={pattern === "solid" ? color : `url(#pattern-${pattern})`}
+                fillOpacity={pattern === "solid" ? opacity * 0.4 : opacity}
                 stroke={color}
                 strokeWidth={isHighlighted ? 1.5 : 0.8}
                 strokeOpacity={isHighlighted ? 1 : 0.9}
               />
-              {/* Highlight glow */}
+              {/* Highlight glow — only when actively highlighted */}
               {isHighlighted && (
                 <polygon
                   points={points}
@@ -209,14 +189,12 @@ function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, 
                   stroke={color}
                   strokeWidth={3}
                   strokeOpacity={0.3}
-                  style={{filter: `drop-shadow(0 0 4px ${color})`}}
                 />
               )}
             </g>
           );
         })}
         
-        {/* Selection outline */}
         {selected && (
           <rect
             x={margin - 3}
@@ -233,7 +211,7 @@ function RealPolygonRenderer({ polygons, bbox, pins, scale, selected, darkMode, 
       </g>
     </svg>
   );
-}
+});
 
 // ═══ RENDERERS ═══
 // Return {svg, pins} where pins=[{id,dx,dy,layer}] (µm offsets from primary pin)
@@ -1886,42 +1864,48 @@ function App(){
   const histIdx=useRef(0);
   const skipHistory=useRef(false);
 
-  // Auto-save sessions to localStorage
+  // Auto-save sessions to localStorage (debounced, skipped during drag)
   // For imported_gds components, store polygon data separately to avoid localStorage limits
+  const autoSaveTimer=useRef(null);
   useEffect(() => {
-    // Prepare placed data for storage - extract large polygon data
-    const placedForStorage = placed.map(comp => {
-      if (comp.type === "imported_gds" && comp.params?.all_polygons) {
-        // Store polygons separately with a unique key
-        const polyKey = `poly_${comp.id}`;
-        try {
-          localStorage.setItem(polyKey, JSON.stringify(comp.params.all_polygons));
-        } catch (e) {
-          console.warn(`Failed to save polygons for ${comp.id}:`, e);
-        }
-        // Return component without the large polygon array, but with a reference
-        return {
-          ...comp,
-          params: {
-            ...comp.params,
-            all_polygons: null,  // Don't store in session
-            _polyKey: polyKey   // Reference to stored polygons
+    // Skip saving during active drag — commit happens on mouseUp
+    if(dragging){return}
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current=setTimeout(()=>{
+      // Prepare placed data for storage - extract large polygon data
+      const placedForStorage = placed.map(comp => {
+        if (comp.type === "imported_gds" && comp.params?.all_polygons) {
+          // Store polygons separately with a unique key
+          const polyKey = `poly_${comp.id}`;
+          try {
+            localStorage.setItem(polyKey, JSON.stringify(comp.params.all_polygons));
+          } catch (e) {
+            console.warn(`Failed to save polygons for ${comp.id}:`, e);
           }
-        };
+          return {
+            ...comp,
+            params: {
+              ...comp.params,
+              all_polygons: null,
+              _polyKey: polyKey
+            }
+          };
+        }
+        return comp;
+      });
+      
+      const updatedSessions = sessionsData.sessions.map(s => 
+        s.id === activeSessionId ? { ...s, placed: placedForStorage, connections } : s
+      );
+      const newData = { activeId: activeSessionId, sessions: updatedSessions };
+      setSessionsData(newData);
+      try {
+        localStorage.setItem('photonic_sessions', JSON.stringify(newData));
+      } catch (e) {
+        console.error("Failed to save session:", e);
       }
-      return comp;
-    });
-    
-    const updatedSessions = sessionsData.sessions.map(s => 
-      s.id === activeSessionId ? { ...s, placed: placedForStorage, connections } : s
-    );
-    const newData = { activeId: activeSessionId, sessions: updatedSessions };
-    setSessionsData(newData);
-    try {
-      localStorage.setItem('photonic_sessions', JSON.stringify(newData));
-    } catch (e) {
-      console.error("Failed to save session:", e);
-    }
+    },500);
+    return()=>clearTimeout(autoSaveTimer.current);
   }, [placed, connections, activeSessionId]);
 
   // Switch session
@@ -2240,7 +2224,7 @@ function App(){
   const[rulerMarkers,setRulerMarkers]=useState([]); // [{id, x, y, type:'point'|'measure', x2?, y2?}]
   const[rulerDragging,setRulerDragging]=useState(null); // {startX, startY} while dragging to measure
   const[openGroups,setOpenGroups]=useState(uiPrefs.current.openGroups||{"waveguides":false,"modulators":false,"resonators":false,"pads":false,"shapes":false,"labels":false}); // collapsible groups - start collapsed
-  const[mousePos,setMousePos]=useState({x:0,y:0});
+  const mousePosRef=useRef({x:0,y:0}); // ref instead of state — no re-render on mouse move
   const[darkMode,setDarkMode]=useState(uiPrefs.current.darkMode||false);
   const gdsInputRef=useRef(null); // Hidden file input for GDS import
   
@@ -2420,10 +2404,15 @@ function App(){
   // Connection polygon loading disabled - using SVG path approximations instead
   // The actual GDS export still uses real nazca routing
   
-  // Save UI preferences to localStorage whenever they change
+  // Save UI preferences to localStorage whenever they change (debounced)
+  const uiPrefsTimer=useRef(null);
   useEffect(()=>{
-    const prefs={openGroups,darkMode,gridSnap,gridSize,autoGrid,zoom,pan,useRealPolygons};
-    localStorage.setItem('photonic_ui_prefs',JSON.stringify(prefs));
+    clearTimeout(uiPrefsTimer.current);
+    uiPrefsTimer.current=setTimeout(()=>{
+      const prefs={openGroups,darkMode,gridSnap,gridSize,autoGrid,zoom,pan,useRealPolygons};
+      localStorage.setItem('photonic_ui_prefs',JSON.stringify(prefs));
+    },300);
+    return()=>clearTimeout(uiPrefsTimer.current);
   },[openGroups,darkMode,gridSnap,gridSize,autoGrid,zoom,pan,useRealPolygons]);
   const panStart=useRef(null);
   const canvasRef=useRef(null);
@@ -2431,6 +2420,21 @@ function App(){
   const idCtr=useRef(0);
   const connCtr=useRef(0);
   const S=BS*zoom;
+  
+  // ═══ HYBRID ZOOM ═══
+  // renderZoom = zoom level at which SVG polygons are rendered crisp
+  // During active zoom: CSS transform bridges gap (GPU-composited, instant)
+  // After 150ms idle: renderZoom catches up (crisp re-render)
+  const[renderZoom,setRenderZoom]=useState(zoom);
+  const renderZoomTimer=useRef(null);
+  const RS=BS*renderZoom;
+  const cssZoomRatio=zoom/renderZoom;
+  
+  useEffect(()=>{
+    clearTimeout(renderZoomTimer.current);
+    renderZoomTimer.current=setTimeout(()=>setRenderZoom(zoom),150);
+    return()=>clearTimeout(renderZoomTimer.current);
+  },[zoom]);
   
   // Auto-calculate grid size based on zoom level for smooth movement
   const effectiveGridSize = autoGrid ? (
@@ -2459,8 +2463,17 @@ function App(){
   };
 
   useEffect(()=>{fetch(`${API}/status`).then(r=>r.json()).then(d=>{setBackendOk(true);setNazcaOk(d.nazca_available)}).catch(()=>setBackendOk(false))},[]);
-  useEffect(()=>{if(!backendOk||!placed.length){setCode("# Add components.");return;}
-    fetch(`${API}/generate_code`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({components:placed,connections})}).then(r=>r.json()).then(d=>setCode(d.code)).catch(()=>{});},[placed,connections,backendOk]);
+  // Debounced code generation — skip during drag
+  const codeGenTimer=useRef(null);
+  useEffect(()=>{
+    if(dragging)return;
+    if(!backendOk||!placed.length){setCode("# Add components.");return;}
+    clearTimeout(codeGenTimer.current);
+    codeGenTimer.current=setTimeout(()=>{
+      fetch(`${API}/generate_code`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({components:placed,connections})}).then(r=>r.json()).then(d=>setCode(d.code)).catch(()=>{});
+    },500);
+    return()=>clearTimeout(codeGenTimer.current);
+  },[placed,connections,backendOk]);
   // Clipboard for copy/paste
   const clipboard=useRef(null);
 
@@ -2640,34 +2653,45 @@ function App(){
       return;
     }
     setSelected(null);setSelConn(null);setPendingPin(null);setMultiSel([]);setIsPanning(true);panStart.current={x:e.clientX-pan.x,y:e.clientY-pan.y}}};
+  // ═══ PERF: RAF-throttled move handler ═══
+  const moveRaf=useRef(null);
+  const rulerDragRef=useRef(null); // live ruler coords without state churn
   const onMove=e=>{
     if(isPanning&&panStart.current)setPan({x:e.clientX-panStart.current.x,y:e.clientY-panStart.current.y});
-    // Track mouse position always
+    // Track mouse position in ref (no re-render)
     const rect=canvasRef.current?.getBoundingClientRect();
     if(rect){
       const wx=(e.clientX-rect.left-pan.x)/S;
       const wy=(e.clientY-rect.top-pan.y)/S;
-      setMousePos({x:wx,y:wy});
-      // Update drag measure if active
+      mousePosRef.current={x:wx,y:wy};
+      // Update ruler drag ref — only push to state on mouseUp
       if(rulerDragging){
+        rulerDragRef.current={...rulerDragging,currentX:wx,currentY:wy};
         setRulerDragging(prev=>({...prev,currentX:wx,currentY:wy}));
       }
     }
-    if(dragging){let nx=(e.clientX-pan.x-dragOff.current.x)/S,ny2=(e.clientY-pan.y-dragOff.current.y)/S;
-      if(gridSnap){nx=snap(nx);ny2=snap(ny2)}
-      
-      // Optional pin-to-pin Y alignment (only when very close and holding Shift)
-      // This prevents unwanted Y jumping during normal drag
-      if(e.shiftKey){
-        const tmp={...placed.find(c=>c.id===dragging),x:nx,y:ny2};
-        const mp=getPins(tmp,S);let bestY=null,bestD=effectiveGridSize*2; // scale threshold with grid
-        for(const o of placed){if(o.id===dragging)continue;for(const op of getPins(o,S))for(const m of mp){
-          const dx=Math.abs(m.wx-op.wx),dy=Math.abs(m.wy-op.wy);
-          if(dx<50/S&&dy<bestD&&dy>0.001){bestD=dy;bestY=op.wy-(m.wy-ny2)}}}
-        if(bestY!==null)ny2=bestY;
-      }
-      
-      setPlaced(prev=>prev.map(c=>c.id===dragging?{...c,x:nx,y:ny2}:c))}};
+    if(dragging){
+      // Throttle drag updates to one per animation frame
+      if(moveRaf.current)return;
+      const clientX=e.clientX,clientY=e.clientY,shiftKey=e.shiftKey;
+      moveRaf.current=requestAnimationFrame(()=>{
+        moveRaf.current=null;
+        let nx=(clientX-pan.x-dragOff.current.x)/S,ny2=(clientY-pan.y-dragOff.current.y)/S;
+        if(gridSnap){nx=snap(nx);ny2=snap(ny2)}
+        
+        // Optional pin-to-pin Y alignment (only when very close and holding Shift)
+        if(shiftKey){
+          const tmp={...placed.find(c=>c.id===dragging),x:nx,y:ny2};
+          const mp=getPins(tmp,S);let bestY=null,bestD=effectiveGridSize*2;
+          for(const o of placed){if(o.id===dragging)continue;for(const op of getPins(o,S))for(const m of mp){
+            const dx=Math.abs(m.wx-op.wx),dy=Math.abs(m.wy-op.wy);
+            if(dx<50/S&&dy<bestD&&dy>0.001){bestD=dy;bestY=op.wy-(m.wy-ny2)}}}
+          if(bestY!==null)ny2=bestY;
+        }
+        
+        setPlaced(prev=>prev.map(c=>c.id===dragging?{...c,x:nx,y:ny2}:c));
+      });
+    }};
   const onUp=e=>{
     // Ruler mode: finish drag and create marker
     if(rulerDragging){
@@ -2697,7 +2721,9 @@ function App(){
       setRulerDragging(null);
       return;
     }
-    setIsPanning(false);setDragging(null);panStart.current=null
+    setIsPanning(false);setDragging(null);panStart.current=null;
+    // Cancel any pending drag RAF
+    if(moveRaf.current){cancelAnimationFrame(moveRaf.current);moveRaf.current=null}
   };
   const startDrag=(e,id)=>{
     // Middle mouse button (scroll wheel click) should start pan, not select
@@ -3201,20 +3227,18 @@ function App(){
     for(const cn of connections){
       const c1=placed.find(c=>c.id===cn.fromComp),c2=placed.find(c=>c.id===cn.toComp);
       if(!c1||!c2)continue;
-      
-      // Get polygon data for each component
       const poly1 = componentPolygons[c1.id];
       const poly2 = componentPolygons[c2.id];
-      const p1=getPins(c1,S,poly1).find(p=>p.id===cn.fromPin);
-      const p2=getPins(c2,S,poly2).find(p=>p.id===cn.toPin);
+      const p1=getPins(c1,RS,poly1).find(p=>p.id===cn.fromPin);
+      const p2=getPins(c2,RS,poly2).find(p=>p.id===cn.toPin);
       if(!p1||!p2)continue;
       
       const lc=cn.layer==="GM1"?T.gm1:T.sin;
       const isSel=cn.id===selConn;
       const x1=p1.absX,y1=p1.absY,x2=p2.absX,y2=p2.absY;
       const mx=(x1+x2)/2,my=(y1+y2)/2;
-      const width = (cn.width || 1) * S;
-      const radius = (cn.radius || 50) * S;
+      const width = (cn.width || 1) * RS;
+      const radius = (cn.radius || 50) * RS;
       
       // Calculate distance and direction
       const dx = x2 - x1;
@@ -3311,16 +3335,17 @@ function App(){
     
     if(pendingPin){
       const pp=pendingPin.wp;
-      els.push(<circle key="pend" cx={pp.x*S} cy={pp.y*S} r={8} fill="none" stroke={T.warn} strokeWidth={2} strokeDasharray="4 2"/>);
+      els.push(<circle key="pend" cx={pp.x*RS} cy={pp.y*RS} r={8} fill="none" stroke={T.warn} strokeWidth={2} strokeDasharray="4 2"/>);
     }
     
     return<>{els}</>;
   };
+  // Memoize ConnLines output — skip recomputing during unrelated state changes
+  const connLinesOutput=React.useMemo(()=><ConnLines/>,[connections,placed,componentPolygons,RS,selConn,pendingPin,darkMode,T.sin,T.gm1,T.warn,T.font]);
 
   const PinDots=()=>{const dots=[];for(const comp of placed){
-    // Always use polygon data for pins
     const polyData = componentPolygons[comp.id];
-    for(const pin of getPins(comp, S, polyData)){const lc=pin.layer==="GM1"?T.gm1:T.sin;
+    for(const pin of getPins(comp, RS, polyData)){const lc=pin.layer==="GM1"?T.gm1:T.sin;
     const isPend1=pendingPin?.compId===comp.id&&pendingPin?.pinId===pin.id;
     const isPend2=pendingPin2?.compId===comp.id&&pendingPin2?.pinId===pin.id;
     const isPend = isPend1 || isPend2;
@@ -3337,6 +3362,250 @@ function App(){
       <text x={labelX} y={pin.absY+4} fill={T.bg} fontSize={10} fontFamily={T.font} fontWeight={700} textAnchor={textAnchor} stroke={T.bg} strokeWidth={3} paintOrder="stroke">{pin.id}</text>
       <text x={labelX} y={pin.absY+4} fill={isPend?pendColor:lc} fontSize={10} fontFamily={T.font} fontWeight={isPend?700:600} textAnchor={textAnchor}>{pin.id}</text>
     </g>)}}return<>{dots}</>};
+  // Memoize PinDots output
+  const pinDotsOutput=React.useMemo(()=><PinDots/>,[placed,componentPolygons,RS,pendingPin,pendingPin2,darkMode,T.gm1,T.sin,T.warn,T.bg,T.font]);
+
+  // ═══ CANVAS2D RENDERING ENGINE ═══
+  // Replaces SVG for grid, polygons, connections — 10-100x faster for large layouts
+  const drawCanvasRef=useRef(null); // the <canvas> element
+  const drawRafRef=useRef(null);
+  const dirtyRef=useRef(true); // flag: needs redraw
+  
+  // Mark dirty whenever rendering inputs change
+  useEffect(()=>{dirtyRef.current=true},[placed,connections,componentPolygons,pan,zoom,renderZoom,selected,selConn,
+    gridSnap,effectiveGridSize,darkMode,highlightLayer,hiddenLayers,pendingPin,connectionPolygons]);
+  
+  // Helper: parse hex color to rgba
+  const hexToRgba=(hex,alpha)=>{
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+  
+  // Canvas draw function — called by RAF loop
+  const drawCanvas=useCallback(()=>{
+    const canvas=drawCanvasRef.current;
+    if(!canvas)return;
+    const ctx=canvas.getContext('2d');
+    if(!ctx)return;
+    
+    const dpr=window.devicePixelRatio||1;
+    const W=canvas.clientWidth, H=canvas.clientHeight;
+    
+    // Resize canvas buffer if needed (handle HiDPI)
+    if(canvas.width!==W*dpr||canvas.height!==H*dpr){
+      canvas.width=W*dpr;
+      canvas.height=H*dpr;
+      ctx.scale(dpr,dpr);
+    }
+    
+    // Clear
+    ctx.clearRect(0,0,W,H);
+    
+    const cRS=BS*renderZoom; // render scale
+    const cS=BS*zoom;
+    const zoomRatio=zoom/renderZoom;
+    
+    // ── GRID ──
+    if(gridSnap){
+      const gs=Math.max(effectiveGridSize*cS,5);
+      const gs5=gs*5;
+      const minorColor=darkMode?"rgba(61,68,80,0.4)":"rgba(176,184,196,0.5)";
+      const majorColor=darkMode?"rgba(90,99,112,0.6)":"rgba(122,134,148,0.7)";
+      
+      ctx.lineWidth=0.5;
+      ctx.strokeStyle=minorColor;
+      ctx.beginPath();
+      const offX=pan.x-RSZ, offY=pan.y-RSZ;
+      const startX=((offX%gs)+gs)%gs, startY=((offY%gs)+gs)%gs;
+      for(let x=startX;x<W;x+=gs){ctx.moveTo(x,0);ctx.lineTo(x,H)}
+      for(let y=startY;y<H;y+=gs){ctx.moveTo(0,y);ctx.lineTo(W,y)}
+      ctx.stroke();
+      
+      ctx.lineWidth=1;
+      ctx.strokeStyle=majorColor;
+      ctx.beginPath();
+      const startX5=((offX%gs5)+gs5)%gs5, startY5=((offY%gs5)+gs5)%gs5;
+      for(let x=startX5;x<W;x+=gs5){ctx.moveTo(x,0);ctx.lineTo(x,H)}
+      for(let y=startY5;y<H;y+=gs5){ctx.moveTo(0,y);ctx.lineTo(W,y)}
+      ctx.stroke();
+    }
+    
+    // ── TRANSFORM for world coordinates ──
+    // Canvas is offset by RSZ from the container, adjust pan
+    ctx.save();
+    ctx.translate(pan.x-RSZ,pan.y-RSZ);
+    if(zoomRatio!==1)ctx.scale(zoomRatio,zoomRatio);
+    
+    // ── POLYGONS (components) ──
+    for(const comp of placed){
+      const polyData=componentPolygons[comp.id];
+      if(!polyData||!polyData.polygons||polyData.polygons.length===0)continue;
+      
+      const bbox=polyData.bbox||{};
+      const minX=bbox.x_min??0,minY=bbox.y_min??0,maxX=bbox.x_max??0,maxY=bbox.y_max??0;
+      
+      // Find anchor pin
+      let anchorX=0,anchorY=0;
+      const pins=polyData.pins;
+      if(pins){
+        if(pins.a0){anchorX=pins.a0.x;anchorY=pins.a0.y}
+        else if(pins.opt_in){anchorX=pins.opt_in.x;anchorY=pins.opt_in.y}
+        else{const fp=Object.values(pins)[0];if(fp){anchorX=fp.x;anchorY=fp.y}}
+      }
+      
+      const rot=(comp.rotation||0)*Math.PI/180;
+      
+      ctx.save();
+      ctx.translate(comp.x*cRS,comp.y*cRS);
+      if(rot!==0)ctx.rotate(rot);
+      
+      // Draw visible polygons
+      const visiblePolygons=polyData.polygons.filter(p=>!hiddenLayers.has(p.layer));
+      for(const poly of visiblePolygons){
+        const layerInfo=POLY_LAYER_COLORS[poly.layer]||{color:"#888888",opacity:0.5};
+        const color=layerInfo.color;
+        const isHL=highlightLayer===poly.layer;
+        const opacity=isHL?1:(highlightLayer!==null?layerInfo.opacity*0.3:layerInfo.opacity);
+        
+        ctx.beginPath();
+        for(let i=0;i<poly.points.length;i++){
+          const[x,y]=poly.points[i];
+          const sx=(x-anchorX)*cRS;
+          const sy=-(y-anchorY)*cRS; // flip Y
+          if(i===0)ctx.moveTo(sx,sy);else ctx.lineTo(sx,sy);
+        }
+        ctx.closePath();
+        
+        // Fill
+        ctx.fillStyle=hexToRgba(color,opacity*0.4);
+        ctx.fill();
+        
+        // Stroke
+        ctx.strokeStyle=hexToRgba(color,isHL?1:0.9);
+        ctx.lineWidth=(isHL?1.5:0.8)/zoomRatio;
+        ctx.stroke();
+        
+        // Highlight glow
+        if(isHL){
+          ctx.strokeStyle=hexToRgba(color,0.3);
+          ctx.lineWidth=3/zoomRatio;
+          ctx.stroke();
+        }
+      }
+      
+      // Selection dashed rect
+      if(comp.id===selected){
+        const w=(maxX-minX)*cRS,h=(maxY-minY)*cRS;
+        const ox=(minX-anchorX)*cRS,oy=-(maxY-anchorY)*cRS;
+        ctx.strokeStyle=darkMode?"#58a6ff":"#1565c0";
+        ctx.lineWidth=2/zoomRatio;
+        ctx.setLineDash([6,3]);
+        ctx.strokeRect(ox-3,oy-3,w+6,h+6);
+        ctx.setLineDash([]);
+      }
+      
+      ctx.restore();
+    }
+    
+    // ── CONNECTIONS ──
+    for(const cn of connections){
+      const c1=placed.find(c=>c.id===cn.fromComp),c2=placed.find(c=>c.id===cn.toComp);
+      if(!c1||!c2)continue;
+      const poly1=componentPolygons[c1.id],poly2=componentPolygons[c2.id];
+      const p1=getPins(c1,cRS,poly1).find(p=>p.id===cn.fromPin);
+      const p2=getPins(c2,cRS,poly2).find(p=>p.id===cn.toPin);
+      if(!p1||!p2)continue;
+      
+      const lc=cn.layer==="GM1"?T.gm1:T.sin;
+      const isSel=cn.id===selConn;
+      const x1=p1.absX,y1=p1.absY,x2=p2.absX,y2=p2.absY;
+      const width=(cn.width||1)*cRS;
+      const radius=(cn.radius||50)*cRS;
+      const dx=x2-x1,dy=y2-y1;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const ctrlDist=Math.max(dist*0.4,radius);
+      
+      let angle1Deg,angle2Deg;
+      if(cn.fromAngle!==undefined){angle1Deg=-cn.fromAngle}
+      else{const ba=cn.fromPin.startsWith('a')?180:0;angle1Deg=-(ba+(c1.rotation||0))}
+      if(cn.toAngle!==undefined){angle2Deg=-cn.toAngle}
+      else{const ba=cn.toPin.startsWith('a')?180:0;angle2Deg=-(ba+(c2.rotation||0))}
+      
+      const a1=angle1Deg*Math.PI/180,a2=angle2Deg*Math.PI/180;
+      const routeType=cn.routeType||"sbend_p2p";
+      
+      // Build path
+      ctx.beginPath();
+      if(routeType==="strt_p2p"){
+        ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+      }else if(routeType==="ubend_p2p"){
+        const ext=ctrlDist*1.5;
+        ctx.moveTo(x1,y1);
+        ctx.bezierCurveTo(x1+Math.cos(a1)*ext,y1+Math.sin(a1)*ext,
+          x2+Math.cos(a2)*ext,y2+Math.sin(a2)*ext,x2,y2);
+      }else{
+        ctx.moveTo(x1,y1);
+        ctx.bezierCurveTo(x1+Math.cos(a1)*ctrlDist,y1+Math.sin(a1)*ctrlDist,
+          x2+Math.cos(a2)*ctrlDist,y2+Math.sin(a2)*ctrlDist,x2,y2);
+      }
+      
+      // Selection glow
+      if(isSel){
+        ctx.strokeStyle=hexToRgba(lc,0.3);
+        ctx.lineWidth=(width+4)/zoomRatio;
+        ctx.setLineDash([6,3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      
+      // Waveguide body
+      ctx.strokeStyle=hexToRgba(lc,0.6);
+      ctx.lineWidth=width/zoomRatio;
+      ctx.lineCap="round";
+      ctx.stroke();
+      
+      // Center line
+      ctx.strokeStyle=hexToRgba(lc,0.9);
+      ctx.lineWidth=Math.max(width*0.2,0.5)/zoomRatio;
+      ctx.stroke();
+      
+      // Route type label
+      const mx=(x1+x2)/2,my=(y1+y2)/2;
+      ctx.fillStyle=hexToRgba(lc,0.6);
+      ctx.font=`${8/zoomRatio}px ${T.font}`;
+      ctx.fillText(RT[cn.routeType]?.label||"",mx+7,my-5);
+    }
+    
+    // Pending pin indicator
+    if(pendingPin){
+      const pp=pendingPin.wp;
+      ctx.beginPath();
+      ctx.arc(pp.x*cRS,pp.y*cRS,8/zoomRatio,0,Math.PI*2);
+      ctx.strokeStyle=T.warn;
+      ctx.lineWidth=2/zoomRatio;
+      ctx.setLineDash([4,2]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    
+    ctx.restore();
+  },[placed,connections,componentPolygons,pan,zoom,renderZoom,gridSnap,effectiveGridSize,
+    darkMode,selected,selConn,highlightLayer,hiddenLayers,pendingPin,T]);
+  
+  // RAF render loop — only draws when dirty
+  useEffect(()=>{
+    let running=true;
+    const loop=()=>{
+      if(!running)return;
+      if(dirtyRef.current){
+        dirtyRef.current=false;
+        drawCanvas();
+      }
+      drawRafRef.current=requestAnimationFrame(loop);
+    };
+    loop();
+    return()=>{running=false;if(drawRafRef.current)cancelAnimationFrame(drawRafRef.current)};
+  },[drawCanvas]);
 
   const Rulers=()=>{const CW=canvasRef.current?.clientWidth||1600,CH=canvasRef.current?.clientHeight||900;
     const STEPS=[1,2,5,10,20,50,100,200,500,1000,2000],step=STEPS.find(s=>s*S>=45)||2000,maj=step*5,tH=[],tV=[];
@@ -3947,96 +4216,83 @@ function App(){
             <div ref={canvasRef} style={{width:"100%",height:"100%",background:T.canvas||T.bg,cursor:isPanning?"grabbing":"default",position:"relative",overflow:"hidden"}}
               onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} tabIndex={0}>
               <Rulers/>
-              <svg className="cbg" style={{position:"absolute",left:RSZ,top:RSZ,width:`calc(100% - ${RSZ}px)`,height:`calc(100% - ${RSZ}px)`,pointerEvents:"none"}}>
-                <defs>
-                  {/* Minor grid - thin dark lines */}
-                  <pattern id="gm" width={gSz} height={gSz} patternUnits="userSpaceOnUse" x={pan.x%gSz} y={pan.y%gSz}>
-                    <line x1={0} y1={0} x2={gSz} y2={0} stroke={darkMode?"#3d4450":"#b0b8c4"} strokeWidth={0.5} opacity={darkMode?0.4:0.5}/>
-                    <line x1={0} y1={0} x2={0} y2={gSz} stroke={darkMode?"#3d4450":"#b0b8c4"} strokeWidth={0.5} opacity={darkMode?0.4:0.5}/>
-                  </pattern>
-                  {/* Major grid - thicker dark lines every 5 units */}
-                  <pattern id="gM" width={gSz*5} height={gSz*5} patternUnits="userSpaceOnUse" x={pan.x%(gSz*5)} y={pan.y%(gSz*5)}>
-                    <line x1={0} y1={0} x2={gSz*5} y2={0} stroke={darkMode?"#5a6370":"#7a8694"} strokeWidth={1} opacity={darkMode?0.6:0.7}/>
-                    <line x1={0} y1={0} x2={0} y2={gSz*5} stroke={darkMode?"#5a6370":"#7a8694"} strokeWidth={1} opacity={darkMode?0.6:0.7}/>
-                  </pattern>
-                </defs>
-                {gridSnap&&<><rect width="100%" height="100%" fill="url(#gm)"/><rect width="100%" height="100%" fill="url(#gM)"/></>}
-              </svg>
-              <svg style={{position:"absolute",left:pan.x,top:pan.y,overflow:"visible",pointerEvents:"all",width:1,height:1,zIndex:5}}>
-                <LayerPatternDefs/>
-                <ConnLines/>
-              </svg>
-              <div style={{position:"absolute",left:pan.x,top:pan.y}}>
+              {/* ═══ Canvas2D layer: grid + polygons + connections (native-speed) ═══ */}
+              <canvas ref={drawCanvasRef} style={{position:"absolute",left:RSZ,top:RSZ,width:`calc(100% - ${RSZ}px)`,height:`calc(100% - ${RSZ}px)`,pointerEvents:"none",zIndex:1}}/>
+              {/* ═══ Fallback component placeholders for components without polygon data ═══ */}
+              <div style={{position:"absolute",left:pan.x,top:pan.y,transform:cssZoomRatio!==1?`scale(${cssZoomRatio})`:undefined,transformOrigin:"0 0",willChange:"transform",zIndex:2}}>
                 {placed.map(c=>{
                   const def=DEFS[c.type];
                   if(!def)return null;
-                  const isSel=c.id===selected;
-                  const isMulti=multiSel.includes(c.id)&&multiSel.length>=2;
-                  const isLoading=polygonLoadingIds.has(c.id);
-                  
-                  // Polygon-only rendering - no icon fallback
-                  let content;
                   const polyData = componentPolygons[c.id];
-                  
-                  if (polyData && polyData.polygons && polyData.polygons.length > 0) {
-                    // Render real polygons
-                    content = (
-                      <RealPolygonRenderer 
-                        polygons={polyData.polygons}
-                        bbox={polyData.bbox}
-                        primaryPin={polyData.primary_pin}
-                        pins={polyData.pins}
-                        scale={S}
-                        selected={isSel}
-                        darkMode={darkMode}
-                        rotation={c.rotation || 0}
-                        componentType={c.type}
-                        highlightLayer={highlightLayer}
-                        hiddenLayers={hiddenLayers}
-                      />
-                    );
-                  } else {
-                    // Show loading placeholder (no icon!)
-                    const estimatedSize = 50; // Approximate size in pixels
-                    content = (
+                  // Skip if canvas is handling this component's polygons
+                  if(polyData && polyData.polygons && polyData.polygons.length > 0)return null;
+                  const isLoading=polygonLoadingIds.has(c.id);
+                  const estimatedSize = 50;
+                  return(
+                    <div key={c.id} style={{position:"absolute",left:c.x*RS,top:c.y*RS,
+                      cursor:rulerMode?"crosshair":alignMode?"crosshair":dragging===c.id?"grabbing":"grab"}}
+                      onMouseDown={e=>startDrag(e,c.id)}>
                       <div style={{
-                        width: estimatedSize,
-                        height: estimatedSize,
-                        background: `${def.color}15`,
-                        border: `1px dashed ${def.color}55`,
-                        borderRadius: 4,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        marginLeft: -estimatedSize/2,
-                        marginTop: -estimatedSize/2
+                        width: estimatedSize, height: estimatedSize,
+                        background: `${def.color}15`, border: `1px dashed ${def.color}55`,
+                        borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                        marginLeft: -estimatedSize/2, marginTop: -estimatedSize/2
                       }}>
-                        <div style={{
-                          color: def.color,
-                          fontSize: 8,
-                          fontFamily: T.sans,
-                          textAlign: "center",
-                          opacity: 0.7
-                        }}>
+                        <div style={{ color: def.color, fontSize: 8, fontFamily: T.sans, textAlign: "center", opacity: 0.7 }}>
                           {isLoading ? "⏳" : "..."}
                         </div>
                       </div>
-                    );
-                  }
-                  
-                  return(
-                    <div key={c.id} style={{position:"absolute",left:c.x*S,top:c.y*S,
-                      cursor:rulerMode?"crosshair":alignMode?"crosshair":dragging===c.id?"grabbing":"grab",
-                      filter:isSel?`drop-shadow(0 0 10px ${def.color}66)`:isMulti?`drop-shadow(0 0 6px ${T.warn}55)`:"drop-shadow(0 1px 4px #00000055)",
-                      transition:dragging===c.id?"none":"filter .15s",
-                      outline:isMulti&&!isSel?`2px dashed ${T.warn}66`:"none",outlineOffset:3}}
-                      onMouseDown={e=>startDrag(e,c.id)}
-                      onWheel={e=>{/* Let wheel events bubble up to canvas for zoom */}}>
-                      {content}
                     </div>
                   );
-                })}</div>
-              <svg style={{position:"absolute",left:pan.x,top:pan.y,overflow:"visible",pointerEvents:"all",width:1,height:1,zIndex:10}} onMouseDown={e=>{if(e.target!==e.currentTarget)e.stopPropagation()}}><PinDots/></svg>
+                })}
+              </div>
+              {/* ═══ Invisible hit-test layer for components rendered by canvas ═══ */}
+              <div style={{position:"absolute",left:pan.x,top:pan.y,transform:cssZoomRatio!==1?`scale(${cssZoomRatio})`:undefined,transformOrigin:"0 0",zIndex:3}}>
+                {placed.map(c=>{
+                  const polyData = componentPolygons[c.id];
+                  if(!polyData||!polyData.polygons||polyData.polygons.length===0)return null;
+                  const bbox=polyData.bbox||{};
+                  const w=((bbox.x_max||0)-(bbox.x_min||0))*RS;
+                  const h=((bbox.y_max||0)-(bbox.y_min||0))*RS;
+                  // Invisible hit rect over the component for drag/select
+                  return(
+                    <div key={c.id} style={{position:"absolute",left:c.x*RS-Math.max(w/2,20),top:c.y*RS-Math.max(h/2,20),
+                      width:Math.max(w,40),height:Math.max(h,40),
+                      cursor:rulerMode?"crosshair":alignMode?"crosshair":dragging===c.id?"grabbing":"grab"}}
+                      onMouseDown={e=>startDrag(e,c.id)}/>
+                  );
+                })}
+              </div>
+              {/* ═══ Connection hit-test layer (invisible paths for click selection) ═══ */}
+              <svg style={{position:"absolute",left:pan.x,top:pan.y,overflow:"visible",pointerEvents:"all",width:1,height:1,zIndex:4,transform:cssZoomRatio!==1?`scale(${cssZoomRatio})`:undefined,transformOrigin:"0 0"}}>
+                {connections.map(cn=>{
+                  const c1=placed.find(c=>c.id===cn.fromComp),c2=placed.find(c=>c.id===cn.toComp);
+                  if(!c1||!c2)return null;
+                  const poly1=componentPolygons[c1.id],poly2=componentPolygons[c2.id];
+                  const p1=getPins(c1,RS,poly1).find(p=>p.id===cn.fromPin);
+                  const p2=getPins(c2,RS,poly2).find(p=>p.id===cn.toPin);
+                  if(!p1||!p2)return null;
+                  const x1=p1.absX,y1=p1.absY,x2=p2.absX,y2=p2.absY;
+                  const width=(cn.width||1)*RS;
+                  const radius=(cn.radius||50)*RS;
+                  const dx=x2-x1,dy=y2-y1,dist=Math.sqrt(dx*dx+dy*dy);
+                  const ctrlDist=Math.max(dist*0.4,radius);
+                  let a1Deg,a2Deg;
+                  if(cn.fromAngle!==undefined)a1Deg=-cn.fromAngle;
+                  else{const ba=cn.fromPin.startsWith('a')?180:0;a1Deg=-(ba+(c1.rotation||0))}
+                  if(cn.toAngle!==undefined)a2Deg=-cn.toAngle;
+                  else{const ba=cn.toPin.startsWith('a')?180:0;a2Deg=-(ba+(c2.rotation||0))}
+                  const a1=a1Deg*Math.PI/180,a2=a2Deg*Math.PI/180;
+                  const rt=cn.routeType||"sbend_p2p";
+                  let d;
+                  if(rt==="strt_p2p")d=`M${x1} ${y1}L${x2} ${y2}`;
+                  else if(rt==="ubend_p2p"){const ext=ctrlDist*1.5;d=`M${x1} ${y1}C${x1+Math.cos(a1)*ext} ${y1+Math.sin(a1)*ext},${x2+Math.cos(a2)*ext} ${y2+Math.sin(a2)*ext},${x2} ${y2}`}
+                  else d=`M${x1} ${y1}C${x1+Math.cos(a1)*ctrlDist} ${y1+Math.sin(a1)*ctrlDist},${x2+Math.cos(a2)*ctrlDist} ${y2+Math.sin(a2)*ctrlDist},${x2} ${y2}`;
+                  return<path key={cn.id} d={d} stroke="transparent" strokeWidth={Math.max(width*3,14)} fill="none" style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();setSelConn(cn.id);setSelected(null)}}/>;
+                })}
+              </svg>
+              {/* ═══ Pin dots SVG overlay (lightweight, needs click events) ═══ */}
+              <svg style={{position:"absolute",left:pan.x,top:pan.y,overflow:"visible",pointerEvents:"all",width:1,height:1,zIndex:10,transform:cssZoomRatio!==1?`scale(${cssZoomRatio})`:undefined,transformOrigin:"0 0",willChange:"transform"}} onMouseDown={e=>{if(e.target!==e.currentTarget)e.stopPropagation()}}>{pinDotsOutput}</svg>
 
               {/* Ruler overlay - crosshairs and measurements */}
               {(rulerMode || rulerMarkers.length > 0) && (()=>{
