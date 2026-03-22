@@ -18,7 +18,7 @@ SRC = Path(__file__).parent.parent / "src" / "app.py"
 
 def patch():
     if not SRC.exists():
-        print(f"  ✗ {SRC} not found")
+        print(f"  [FAIL] {SRC} not found")
         return
 
     code = SRC.read_text(encoding="utf-8")
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     if old_main in code:
         code = code.replace(old_main, new_main)
         SRC.write_text(code, encoding="utf-8")
-        print("  ✓ app.py patched for Electron integration")
+        print("  [OK] app.py patched for Electron integration")
     elif "FLASK_PORT" in code:
         print("  (app.py already patched)")
     else:
@@ -69,7 +69,7 @@ if __name__ == "__main__":
             flags=re.DOTALL
         )
         SRC.write_text(code, encoding="utf-8")
-        print("  ✓ app.py patched (flexible match)")
+        print("  [OK] app.py patched (flexible match)")
 
 
 if __name__ == "__main__":
